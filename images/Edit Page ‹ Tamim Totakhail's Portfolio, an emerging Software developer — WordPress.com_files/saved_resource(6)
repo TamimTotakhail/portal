@@ -1,0 +1,523 @@
+
+( function( $, google ) {
+
+	window.geolocationLoadMapAPI = function() {
+	};
+
+	var existingLocation,
+			location,
+			// only initialize one time
+			initialized = false,
+			// node for the panel div
+			panel = null,
+			searchField,
+			progressField,
+			locationField,
+			dialogField,
+			errorField,
+			geolocationSupported = window.navigator.geolocation !== undefined,
+			// google map instance
+			map = null,
+			marker = null,
+			isOpen = false,
+			googleMapsLoaded = false,
+			i18n = geolocationI18N,
+			// don't load the api until we're sure we need it
+			loadLib = function() {
+
+				if (!google) {
+					return;
+				}
+
+				if (googleMapsLoaded) {
+					return;
+				}
+				googleMapsLoaded = true;
+				google.load( "maps", "3", { "other_params": geolocationI18N.api_key, "callback": "geolocationLoadMapAPI" } );
+
+			},
+			// methods accessible through
+			methods = {
+				'init' : function( options ) {
+
+					var context = this;
+
+					if ( !initialized ) {
+						initialized = true;
+						methods.buildPanel.call( this );
+
+						this.on( 'click', function( e ){
+							e.preventDefault();
+							methods.toggle.call( context );
+						} );
+
+					}
+
+					if (options && options.location) {
+						methods.setLocation.call( context, options.location );
+
+						if ( methods.hasExistingLocation.call( context ) ) {
+							loadLib();
+						}
+
+					}
+
+					if (!google) {
+						setTimeout(function(){
+							context.trigger( 'locationDisabled' );
+						}, 1);
+					}
+
+					return this;
+
+				},
+				'toggle' : function() {
+					if ( isOpen ) {
+						methods.close.call( this );
+					} else {
+						methods.open.call( this );
+					}
+				},
+				'buildPanel' : function() {
+
+					var context = this;
+
+					panel = $( "<div class=\"geolocation-panel-container\"></div>" )
+											.addClass( 'geolocation-panel' );
+
+					searchField = $( "<span><a class=\"button disabled\" href=\"#locate\">Locate</a><span class=\"geolocation-search-input\"><input id='geolocation-search-input' type=\"text\" placeholder='Address' /><label for='geolocation-search-input'>Current Location</label></span></span>" )
+													.addClass( 'geolocation-search-field' )
+													.appendTo( panel );
+
+					searchField.find( 'label' ).text( i18n.current_location );
+					searchField.find( 'a' ).text( i18n.locate );
+					searchField.find( 'input' ).attr( 'placeholder', i18n.address );
+
+					progressField = $( "<span><span class=\"spinner\"></span><span class=\"progress-message\">Locating</span></span>" )
+														.addClass( 'geolocation-progress-field' )
+														.appendTo( panel )
+														.hide();
+
+					progressField.find( '.progress-message' ).text( i18n.locating );
+
+					dialogField = $( "<span><a class=\"button\" href=\"#search\">Search</a><a class=\"button-primary\" href=\"#use\">Use</a><span></span></span>")
+														.addClass( 'geolocation-dialog-field' )
+														.appendTo( panel )
+														.hide();
+					dialogField.find( '[href="#search"]' ).text( i18n.search );
+					dialogField.find( '[href="#use"]' ).text( i18n.use );
+
+					locationField = $( "<span>Location, US</span>" )
+														.addClass( 'geolocation-location-field' )
+														.appendTo( panel )
+														.hide();
+
+					errorField = $( "<span><a class=\"button\" href=\"#search\">Back</a><span>Location not found.</span></span>" )
+														.addClass( 'geolocation-error-field' )
+														.appendTo( panel )
+														.hide();
+
+					errorField.find( 'a' ).text( i18n.text );
+					errorField.find( 'span' ).text( i18n.error );
+
+					if ( geolocationSupported ) {
+						searchField.find( 'a' ).removeClass( 'disabled' );
+						searchField.find( 'input' ).attr( 'placeholder', '' );
+					} else {
+						searchField.find( 'label' ).hide();
+					}
+
+				},
+				// show the panel
+				'open' : function() {
+					loadLib();
+					var context = this;
+
+					isOpen = true;
+
+					panel.insertAfter( '#wp-content-media-buttons' );
+
+					methods.position.call( this, panel );
+
+					// delay registering the click event or it will get fired during the
+					// click event that opens this panel
+					setTimeout(function(){
+
+						$( document.body ).on( 'click.geolocationPicker', function(e) {
+
+							if ( ! $( e.target ).parents().andSelf().is( $( panel, context ) ) ) {
+								e.preventDefault();
+								methods.close.call( context );
+							}
+
+						} );
+
+					}, 1);
+
+					$( window ).one( 'resize', function() {
+						methods.close.call( context );
+					} );
+
+					panel.on( 'keyup.geolocationPicker', 'input', function(e) {
+						var input = searchField.find( 'input' ).val();
+								disable = !geolocationSupported && input === "";
+
+						searchField.find( 'a' ).toggleClass( 'disabled', disable );
+
+						if ( !geolocationSupported ) {
+							return;
+						}
+
+						searchField.find( 'label' )[ input === '' ? 'show' : 'hide' ]();
+					} );
+
+					panel.on( 'keydown.geolocationPicker', 'input', function(e) {
+
+						// return should fire a search
+						if ( e.which == 13 ) {
+							e.preventDefault();
+							searchField.find( 'a' ).trigger( 'click.geolocationPicker' );
+						} else if ( e.which == 27 ) {
+							e.preventDefault();
+							methods.close.call( context );
+						}
+
+					});
+
+					panel.on( 'click.geolocationPicker', '[href="#locate"]', function(e) {
+
+						e.preventDefault();
+
+						if (searchField.find( 'a' ).hasClass( 'disabled' ) ) {
+							return;
+						}
+
+						context.trigger( 'locating' );
+
+						var address = searchField.find( 'input' ).val();
+
+						if ( address === '' && geolocationSupported ) {
+							methods.locate.call( context );
+						} else {
+							methods.geocode.call( context, { 'address': searchField.find( 'input' ).val() } );
+						}
+
+					} );
+
+					panel.on( 'click.geolocationPicker', '[href="#use"]', function( e ) {
+						e.preventDefault();
+						if ( methods.hasLocation() ) {
+							context.trigger( 'locationPicked', [location] );
+						} else {
+							context.trigger( 'locationRemoved' );
+						}
+					} );
+
+					panel.on( 'click.geolocationPicker', '[href="#search"]', function( e ) {
+						e.preventDefault();
+
+						methods.removeMap.call(context);
+
+						searchField.show();
+						locationField.hide();
+						dialogField.hide();
+						progressField.hide();
+						errorField.hide();
+
+					} );
+
+					this.on( 'locating.geolocationPicker', function() {
+						searchField.hide();
+						locationField.hide();
+						dialogField.hide();
+						errorField.hide();
+						progressField.show();
+						errorField.hide();
+					} );
+
+					this.on( 'located.geolocationPicker', function( e, found, result ) {
+						locationField.show();
+						dialogField.show();
+						searchField.hide();
+						errorField.hide();
+						progressField.hide();
+
+						methods.displayLocation.call( context, found, result );
+					} );
+
+					this.on( 'locationRemoved.geolocationPicker', function() {
+						locationField.hide();
+						dialogField.hide();
+						searchField.show();
+						progressField.hide();
+						errorField.hide();
+
+						methods.clearLocation.call( context );
+						methods.close.call( context );
+
+					});
+
+					this.on( 'locationPicked.geolocationPicker', function( e, location ) {
+						methods.setLocation.call( context, location );
+						methods.close.call( context );
+					});
+
+					this.on( 'locationError.geolocationPicker', function( e ) {
+
+						locationField.hide();
+						dialogField.hide();
+						searchField.hide();
+						progressField.hide();
+
+						errorField.show();
+
+					} );
+
+
+					if ( methods.hasExistingLocation.call( context ) ) {
+						this.trigger( 'located', existingLocation );
+					}
+
+					searchField.find( 'input' ).focus();
+
+				},
+				'close' : function() {
+					$( document.body ).off( 'click.geolocationPicker' );
+					panel.remove();
+
+					methods.removeMap.call( this );
+
+					panel.off( '.geolocationPicker' );
+					this.off( '.geolocationPicker' );
+
+					isOpen = false;
+				},
+				'position' : function( panel ) {
+
+					// TODO: if we're on a narrow screen we're going to leave it in a relative flow
+
+					var anchor = this.position();
+
+					if ( $( window ).width() >= 780 ) {
+						panel
+							.css( {
+								'position' : 'absolute',
+								'top' : anchor.top - 10,
+								'left' : anchor.left + this.outerWidth(),
+								'z-index' : 1000,
+								'width' : '320'
+							} )
+							.removeClass( 'inline' );
+
+						var rightEdge = panel.offset().left + panel.outerWidth(),
+								rightEdgeLimit = $(window).width() - 10;
+						if ( rightEdge >  rightEdgeLimit ) {
+							panel.css({
+								'left' : panel.position().left + rightEdgeLimit - rightEdge
+							});
+						}
+
+					} else {
+						panel
+							.css( {
+								'position' : 'relative',
+								'width' : 'auto',
+								'left' : 0,
+								'top' : 0
+							} )
+							.addClass( 'inline' );
+					}
+
+
+				},
+
+				'hasExistingLocation' : function() {
+
+					if ( !existingLocation ) {
+						return false;
+					}
+
+					var hasCoord = existingLocation.latitude && existingLocation.longitude;
+
+					return hasCoord;
+
+				},
+
+				'hasLocation' : function() {
+
+					var hasCoord = location && location.latitude && location.longitude;
+
+					if ( !hasCoord ) {
+						return false;
+					}
+
+					if (hasCoord && !location.address) {
+						location.address = location.latitude + ", " + location.longitude;
+					}
+
+					return true;
+
+				},
+				// the location data for this post
+				'setLocation' : function( newLocation ) {
+					var hasCoords = newLocation && newLocation.latitude && newLocation.longitude;
+
+					if ( hasCoords && !newLocation.address ) {
+						newLocation.address = newLocation.latitude + ", " + newLocation.longitude;
+					}
+
+					if ( hasCoords ) {
+						existingLocation = newLocation;
+						location = null;
+						this
+							.text( newLocation.address )
+							.attr( 'title', newLocation.address )
+							.addClass( 'located' );
+					}
+				},
+				'clearLocation' : function() {
+					existingLocation = null;
+					dialogField.find( '[href="#use"]' ).text( 'Use' );
+					this
+						.text( "Add Location" )
+						.attr( 'title', null )
+						.removeClass( 'located' );
+					methods.removeMap.call( this );
+				},
+				'removeMap' : function() {
+					if ( map ) {
+						$( map.getDiv() ).remove();
+						map = null;
+					}
+				},
+				'locate' : function() {
+					var context = this,
+							onPosition = $.proxy( function( position ) {
+								var coords = new google.maps.LatLng(
+											position.coords.latitude,
+											position.coords.longitude
+										);
+
+								methods.geocode.call( this, {'latLng': coords } );
+							}, this ),
+							onError = $.proxy( function() {
+								context.trigger( 'locationError' );
+							}, this );
+
+					window.navigator.geolocation.getCurrentPosition( onPosition, onError, {timeout:5000} );
+
+				},
+				'geocode' : function( query ) {
+
+					var context = this,
+							geocoder = new google.maps.Geocoder();
+
+					geocoder.geocode( query, function( results, status ) {
+
+						if ( status == google.maps.GeocoderStatus.OK ) {
+							// pick the first political result
+
+							var use_result = false,
+									result,
+									searched_geo = query.latLng;
+
+							for (var i = 0; i < results.length; i++) {
+								result = results[i];
+
+								use_result = searched_geo ? $.inArray( 'political', result.types ) > -1 : true ;
+
+								if ( use_result ) {
+									name = result.formatted_address;
+									if ( searched_geo ) {
+										location = {
+											latitude: query.latLng.lat(),
+											longitude: query.latLng.lng()
+										};
+									} else {
+										location = {
+											latitude: result.geometry.location.lat(),
+											longitude: result.geometry.location.lng(),
+										};
+									}
+									location.result = result;
+									location.address = name;
+									break;
+								}
+							}
+
+							if( use_result ) context.trigger( 'located', [ location, result ] );
+
+						} else {
+							context.trigger( 'locationError' );
+						}
+					});
+
+				},
+				'displayLocation' : function( location, result ) {
+
+					var latLng = new google.maps.LatLng( location.latitude, location.longitude );
+
+					if ( methods.hasLocation.call( this ) ) {
+						dialogField.find( '[href="#use"]' ).text( 'Use' );
+					} else if (methods.hasExistingLocation.call( this ) ) {
+						dialogField.find( '[href="#use"]' ).text( 'Remove' );
+					}
+
+					locationField.text( location.address );
+
+					if ( map === null ) {
+						var mapNode = $( '<div></div>' )
+														.addClass( 'geolocation-map-container' )
+														.css( { 'width':panel.width(), 'height':Math.min(240, panel.width()) } )
+														.insertBefore( locationField );
+
+						map = new google.maps.Map( mapNode.get(0), {
+							center: result ? result.geometry.location : latLng,
+							zoom: 9,
+							draggable: false,
+							streetViewControl: false,
+							zoomControl: true,
+							mapTypeControl: false,
+							overviewMapControl: false,
+							panControl: true,
+							rotateControl: false,
+							scaleControl: false
+						} );
+					}
+
+					if ( marker ) {
+						marker.setMap( null );
+					}
+
+					marker = new google.maps.Marker( {
+						map: map,
+						position: latLng
+					} );
+
+					if ( result ) {
+						map.fitBounds( result.geometry.viewport );
+					} else {
+						map.setCenter( latLng );
+					}
+
+				}
+		};
+
+	$.fn.geolocationPicker = function() {
+
+		var args = [].slice.apply(arguments),
+				// first argument should be
+				methodName = $.type( args[0] ) === 'string' ? args.shift() : 'init',
+				method = methods[methodName] || function() { throw( "Method " + method + " does not exist for geolocationPicker" ); };
+
+				return method.apply( this, args );
+	};
+
+})( jQuery, window.google );
+;
+(()=>{"use strict";var e={d:(t,d)=>{for(var o in d)e.o(d,o)&&!e.o(t,o)&&Object.defineProperty(t,o,{enumerable:!0,get:d[o]})},o:(e,t)=>Object.prototype.hasOwnProperty.call(e,t)},t={};function d(e){"undefined"!=typeof document&&("complete"!==document.readyState&&"interactive"!==document.readyState?document.addEventListener("DOMContentLoaded",e):e())}e.d(t,{default:()=>d}),(window.wp=window.wp||{}).domReady=t.default})();
+//# sourceMappingURL=index.min.js.map;
+(()=>{"use strict";var e={n:t=>{var n=t&&t.__esModule?()=>t.default:()=>t;return e.d(n,{a:n}),n},d:(t,n)=>{for(var o in n)e.o(n,o)&&!e.o(t,o)&&Object.defineProperty(t,o,{enumerable:!0,get:n[o]})},o:(e,t)=>Object.prototype.hasOwnProperty.call(e,t),r:e=>{"undefined"!=typeof Symbol&&Symbol.toStringTag&&Object.defineProperty(e,Symbol.toStringTag,{value:"Module"}),Object.defineProperty(e,"__esModule",{value:!0})}},t={};e.r(t),e.d(t,{setup:()=>r,speak:()=>p});const n=window.wp.domReady;var o=e.n(n);const i=window.wp.i18n;function a(){let e=arguments.length>0&&void 0!==arguments[0]?arguments[0]:"polite";const t=document.createElement("div");t.id=`a11y-speak-${e}`,t.className="a11y-speak-region",t.setAttribute("style","position: absolute;margin: -1px;padding: 0;height: 1px;width: 1px;overflow: hidden;clip: rect(1px, 1px, 1px, 1px);-webkit-clip-path: inset(50%);clip-path: inset(50%);border: 0;word-wrap: normal !important;"),t.setAttribute("aria-live",e),t.setAttribute("aria-relevant","additions text"),t.setAttribute("aria-atomic","true");const{body:n}=document;return n&&n.appendChild(t),t}let d="";function r(){const e=document.getElementById("a11y-speak-intro-text"),t=document.getElementById("a11y-speak-assertive"),n=document.getElementById("a11y-speak-polite");null===e&&function(){const e=document.createElement("p");e.id="a11y-speak-intro-text",e.className="a11y-speak-intro-text",e.textContent=(0,i.__)("Notifications"),e.setAttribute("style","position: absolute;margin: -1px;padding: 0;height: 1px;width: 1px;overflow: hidden;clip: rect(1px, 1px, 1px, 1px);-webkit-clip-path: inset(50%);clip-path: inset(50%);border: 0;word-wrap: normal !important;"),e.setAttribute("hidden","hidden");const{body:t}=document;t&&t.appendChild(e)}(),null===t&&a("assertive"),null===n&&a("polite")}function p(e,t){!function(){const e=document.getElementsByClassName("a11y-speak-region"),t=document.getElementById("a11y-speak-intro-text");for(let t=0;t<e.length;t++)e[t].textContent="";t&&t.setAttribute("hidden","hidden")}(),e=function(e){return e=e.replace(/<[^<>]+>/g," "),d===e&&(e+=" "),d=e,e}(e);const n=document.getElementById("a11y-speak-intro-text"),o=document.getElementById("a11y-speak-assertive"),i=document.getElementById("a11y-speak-polite");o&&"assertive"===t?o.textContent=e:i&&(i.textContent=e),n&&n.removeAttribute("hidden")}o()(r),(window.wp=window.wp||{}).a11y=t})();
+//# sourceMappingURL=index.min.js.map;
+(()=>{var e={4793:e=>{var t={À:"A",Á:"A",Â:"A",Ã:"A",Ä:"A",Å:"A",Ấ:"A",Ắ:"A",Ẳ:"A",Ẵ:"A",Ặ:"A",Æ:"AE",Ầ:"A",Ằ:"A",Ȃ:"A",Ç:"C",Ḉ:"C",È:"E",É:"E",Ê:"E",Ë:"E",Ế:"E",Ḗ:"E",Ề:"E",Ḕ:"E",Ḝ:"E",Ȇ:"E",Ì:"I",Í:"I",Î:"I",Ï:"I",Ḯ:"I",Ȋ:"I",Ð:"D",Ñ:"N",Ò:"O",Ó:"O",Ô:"O",Õ:"O",Ö:"O",Ø:"O",Ố:"O",Ṍ:"O",Ṓ:"O",Ȏ:"O",Ù:"U",Ú:"U",Û:"U",Ü:"U",Ý:"Y",à:"a",á:"a",â:"a",ã:"a",ä:"a",å:"a",ấ:"a",ắ:"a",ẳ:"a",ẵ:"a",ặ:"a",æ:"ae",ầ:"a",ằ:"a",ȃ:"a",ç:"c",ḉ:"c",è:"e",é:"e",ê:"e",ë:"e",ế:"e",ḗ:"e",ề:"e",ḕ:"e",ḝ:"e",ȇ:"e",ì:"i",í:"i",î:"i",ï:"i",ḯ:"i",ȋ:"i",ð:"d",ñ:"n",ò:"o",ó:"o",ô:"o",õ:"o",ö:"o",ø:"o",ố:"o",ṍ:"o",ṓ:"o",ȏ:"o",ù:"u",ú:"u",û:"u",ü:"u",ý:"y",ÿ:"y",Ā:"A",ā:"a",Ă:"A",ă:"a",Ą:"A",ą:"a",Ć:"C",ć:"c",Ĉ:"C",ĉ:"c",Ċ:"C",ċ:"c",Č:"C",č:"c",C̆:"C",c̆:"c",Ď:"D",ď:"d",Đ:"D",đ:"d",Ē:"E",ē:"e",Ĕ:"E",ĕ:"e",Ė:"E",ė:"e",Ę:"E",ę:"e",Ě:"E",ě:"e",Ĝ:"G",Ǵ:"G",ĝ:"g",ǵ:"g",Ğ:"G",ğ:"g",Ġ:"G",ġ:"g",Ģ:"G",ģ:"g",Ĥ:"H",ĥ:"h",Ħ:"H",ħ:"h",Ḫ:"H",ḫ:"h",Ĩ:"I",ĩ:"i",Ī:"I",ī:"i",Ĭ:"I",ĭ:"i",Į:"I",į:"i",İ:"I",ı:"i",Ĳ:"IJ",ĳ:"ij",Ĵ:"J",ĵ:"j",Ķ:"K",ķ:"k",Ḱ:"K",ḱ:"k",K̆:"K",k̆:"k",Ĺ:"L",ĺ:"l",Ļ:"L",ļ:"l",Ľ:"L",ľ:"l",Ŀ:"L",ŀ:"l",Ł:"l",ł:"l",Ḿ:"M",ḿ:"m",M̆:"M",m̆:"m",Ń:"N",ń:"n",Ņ:"N",ņ:"n",Ň:"N",ň:"n",ŉ:"n",N̆:"N",n̆:"n",Ō:"O",ō:"o",Ŏ:"O",ŏ:"o",Ő:"O",ő:"o",Œ:"OE",œ:"oe",P̆:"P",p̆:"p",Ŕ:"R",ŕ:"r",Ŗ:"R",ŗ:"r",Ř:"R",ř:"r",R̆:"R",r̆:"r",Ȓ:"R",ȓ:"r",Ś:"S",ś:"s",Ŝ:"S",ŝ:"s",Ş:"S",Ș:"S",ș:"s",ş:"s",Š:"S",š:"s",Ţ:"T",ţ:"t",ț:"t",Ț:"T",Ť:"T",ť:"t",Ŧ:"T",ŧ:"t",T̆:"T",t̆:"t",Ũ:"U",ũ:"u",Ū:"U",ū:"u",Ŭ:"U",ŭ:"u",Ů:"U",ů:"u",Ű:"U",ű:"u",Ų:"U",ų:"u",Ȗ:"U",ȗ:"u",V̆:"V",v̆:"v",Ŵ:"W",ŵ:"w",Ẃ:"W",ẃ:"w",X̆:"X",x̆:"x",Ŷ:"Y",ŷ:"y",Ÿ:"Y",Y̆:"Y",y̆:"y",Ź:"Z",ź:"z",Ż:"Z",ż:"z",Ž:"Z",ž:"z",ſ:"s",ƒ:"f",Ơ:"O",ơ:"o",Ư:"U",ư:"u",Ǎ:"A",ǎ:"a",Ǐ:"I",ǐ:"i",Ǒ:"O",ǒ:"o",Ǔ:"U",ǔ:"u",Ǖ:"U",ǖ:"u",Ǘ:"U",ǘ:"u",Ǚ:"U",ǚ:"u",Ǜ:"U",ǜ:"u",Ứ:"U",ứ:"u",Ṹ:"U",ṹ:"u",Ǻ:"A",ǻ:"a",Ǽ:"AE",ǽ:"ae",Ǿ:"O",ǿ:"o",Þ:"TH",þ:"th",Ṕ:"P",ṕ:"p",Ṥ:"S",ṥ:"s",X́:"X",x́:"x",Ѓ:"Г",ѓ:"г",Ќ:"К",ќ:"к",A̋:"A",a̋:"a",E̋:"E",e̋:"e",I̋:"I",i̋:"i",Ǹ:"N",ǹ:"n",Ồ:"O",ồ:"o",Ṑ:"O",ṑ:"o",Ừ:"U",ừ:"u",Ẁ:"W",ẁ:"w",Ỳ:"Y",ỳ:"y",Ȁ:"A",ȁ:"a",Ȅ:"E",ȅ:"e",Ȉ:"I",ȉ:"i",Ȍ:"O",ȍ:"o",Ȑ:"R",ȑ:"r",Ȕ:"U",ȕ:"u",B̌:"B",b̌:"b",Č̣:"C",č̣:"c",Ê̌:"E",ê̌:"e",F̌:"F",f̌:"f",Ǧ:"G",ǧ:"g",Ȟ:"H",ȟ:"h",J̌:"J",ǰ:"j",Ǩ:"K",ǩ:"k",M̌:"M",m̌:"m",P̌:"P",p̌:"p",Q̌:"Q",q̌:"q",Ř̩:"R",ř̩:"r",Ṧ:"S",ṧ:"s",V̌:"V",v̌:"v",W̌:"W",w̌:"w",X̌:"X",x̌:"x",Y̌:"Y",y̌:"y",A̧:"A",a̧:"a",B̧:"B",b̧:"b",Ḑ:"D",ḑ:"d",Ȩ:"E",ȩ:"e",Ɛ̧:"E",ɛ̧:"e",Ḩ:"H",ḩ:"h",I̧:"I",i̧:"i",Ɨ̧:"I",ɨ̧:"i",M̧:"M",m̧:"m",O̧:"O",o̧:"o",Q̧:"Q",q̧:"q",U̧:"U",u̧:"u",X̧:"X",x̧:"x",Z̧:"Z",z̧:"z"},r=Object.keys(t).join("|"),n=new RegExp(r,"g"),o=new RegExp(r,""),i=function(e){return e.replace(n,(function(e){return t[e]}))};e.exports=i,e.exports.has=function(e){return!!e.match(o)},e.exports.remove=i}},t={};function r(n){var o=t[n];if(void 0!==o)return o.exports;var i=t[n]={exports:{}};return e[n](i,i.exports,r),i.exports}r.n=e=>{var t=e&&e.__esModule?()=>e.default:()=>e;return r.d(t,{a:t}),t},r.d=(e,t)=>{for(var n in t)r.o(t,n)&&!r.o(e,n)&&Object.defineProperty(e,n,{enumerable:!0,get:t[n]})},r.o=(e,t)=>Object.prototype.hasOwnProperty.call(e,t),r.r=e=>{"undefined"!=typeof Symbol&&Symbol.toStringTag&&Object.defineProperty(e,Symbol.toStringTag,{value:"Module"}),Object.defineProperty(e,"__esModule",{value:!0})};var n={};(()=>{"use strict";function e(e){try{return new URL(e),!0}catch{return!1}}r.r(n),r.d(n,{addQueryArgs:()=>O,buildQueryString:()=>f,cleanForSlug:()=>j,filterURLForDisplay:()=>w,getAuthority:()=>c,getFilename:()=>C,getFragment:()=>h,getPath:()=>a,getPathAndQueryString:()=>d,getProtocol:()=>i,getQueryArg:()=>U,getQueryArgs:()=>A,getQueryString:()=>p,hasQueryArg:()=>E,isEmail:()=>o,isURL:()=>e,isValidAuthority:()=>s,isValidFragment:()=>y,isValidPath:()=>l,isValidProtocol:()=>u,isValidQueryString:()=>g,normalizePath:()=>P,prependHTTP:()=>b,prependHTTPS:()=>Q,removeQueryArgs:()=>I,safeDecodeURI:()=>v,safeDecodeURIComponent:()=>m});const t=/^(mailto:)?[a-z0-9._%+-]+@[a-z0-9][a-z0-9.-]*\.[a-z]{2,63}$/i;function o(e){return t.test(e)}function i(e){const t=/^([^\s:]+:)/.exec(e);if(t)return t[1]}function u(e){return!!e&&/^[a-z\-.\+]+[0-9]*:$/i.test(e)}function c(e){const t=/^[^\/\s:]+:(?:\/\/)?\/?([^\/\s#?]+)[\/#?]{0,1}\S*$/.exec(e);if(t)return t[1]}function s(e){return!!e&&/^[^\s#?]+$/.test(e)}function a(e){const t=/^[^\/\s:]+:(?:\/\/)?[^\/\s#?]+[\/]([^\s#?]+)[#?]{0,1}\S*$/.exec(e);if(t)return t[1]}function l(e){return!!e&&/^[^\s#?]+$/.test(e)}function p(e){let t;try{t=new URL(e,"http://example.com").search.substring(1)}catch(e){}if(t)return t}function f(e){let t="";const r=Object.entries(e);let n;for(;n=r.shift();){let[e,o]=n;if(Array.isArray(o)||o&&o.constructor===Object){const t=Object.entries(o).reverse();for(const[n,o]of t)r.unshift([`${e}[${n}]`,o])}else void 0!==o&&(null===o&&(o=""),t+="&"+[e,o].map(encodeURIComponent).join("="))}return t.substr(1)}function g(e){return!!e&&/^[^\s#?\/]+$/.test(e)}function d(e){const t=a(e),r=p(e);let n="/";return t&&(n+=t),r&&(n+=`?${r}`),n}function h(e){const t=/^\S+?(#[^\s\?]*)/.exec(e);if(t)return t[1]}function y(e){return!!e&&/^#[^\s#?\/]*$/.test(e)}function m(e){try{return decodeURIComponent(e)}catch(t){return e}}function A(e){return(p(e)||"").replace(/\+/g,"%20").split("&").reduce(((e,t)=>{const[r,n=""]=t.split("=").filter(Boolean).map(m);return r&&function(e,t,r){const n=t.length,o=n-1;for(let i=0;i<n;i++){let n=t[i];!n&&Array.isArray(e)&&(n=e.length.toString()),n=["__proto__","constructor","prototype"].includes(n)?n.toUpperCase():n;const u=!isNaN(Number(t[i+1]));e[n]=i===o?r:e[n]||(u?[]:{}),Array.isArray(e[n])&&!u&&(e[n]={...e[n]}),e=e[n]}}(e,r.replace(/\]/g,"").split("["),n),e}),Object.create(null))}function O(){let e=arguments.length>0&&void 0!==arguments[0]?arguments[0]:"",t=arguments.length>1?arguments[1]:void 0;if(!t||!Object.keys(t).length)return e;let r=e;const n=e.indexOf("?");return-1!==n&&(t=Object.assign(A(e),t),r=r.substr(0,n)),r+"?"+f(t)}function U(e,t){return A(e)[t]}function E(e,t){return void 0!==U(e,t)}function I(e){const t=e.indexOf("?");if(-1===t)return e;const r=A(e),n=e.substr(0,t);for(var o=arguments.length,i=new Array(o>1?o-1:0),u=1;u<o;u++)i[u-1]=arguments[u];i.forEach((e=>delete r[e]));const c=f(r);return c?n+"?"+c:n}const x=/^(?:[a-z]+:|#|\?|\.|\/)/i;function b(e){return e?(e=e.trim(),x.test(e)||o(e)?e:"http://"+e):e}function v(e){try{return decodeURI(e)}catch(t){return e}}function w(e){let t=arguments.length>1&&void 0!==arguments[1]?arguments[1]:null,r=e.replace(/^(?:https?:)\/\/(?:www\.)?/,"");r.match(/^[^\/]+\/$/)&&(r=r.replace("/",""));const n=/([\w|:])*\.(?:jpg|jpeg|gif|png|svg)/;if(!t||r.length<=t||!r.match(n))return r;r=r.split("?")[0];const o=r.split("/"),i=o[o.length-1];if(i.length<=t)return"…"+r.slice(-t);const u=i.lastIndexOf("."),[c,s]=[i.slice(0,u),i.slice(u+1)],a=c.slice(-3)+"."+s;return i.slice(0,t-a.length-1)+"…"+a}var R=r(4793),S=r.n(R);function j(e){return e?S()(e).replace(/[\s\./]+/g,"-").replace(/[^\p{L}\p{N}_-]+/gu,"").toLowerCase().replace(/-+/g,"-").replace(/(^-+)|(-+$)/g,""):""}function C(e){let t;try{t=new URL(e,"http://example.com").pathname.split("/").pop()}catch(e){}if(t)return t}function P(e){const t=e.split("?"),r=t[1],n=t[0];return r?n+"?"+r.split("&").map((e=>e.split("="))).map((e=>e.map(decodeURIComponent))).sort(((e,t)=>e[0].localeCompare(t[0]))).map((e=>e.map(encodeURIComponent))).map((e=>e.join("="))).join("&"):n}function Q(e){return e?e.startsWith("http://")?e:(e=b(e)).replace(/^http:/,"https:"):e}})(),(window.wp=window.wp||{}).url=n})();
+//# sourceMappingURL=index.min.js.map;
