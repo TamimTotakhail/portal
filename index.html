@@ -11,22 +11,45 @@
 </head>
 
 <body>
-  <header>
+  "<header>
     <h1 class="page-header">Tamim Totakhail</h1>
     <nav class="topnav" id="myTopnav">
-      <a href="index.html" class="active">Home</a>
-      <a href="https://tamimtotakhail.github.io/stylin-with-css/" target="_blank">Stylin with CSS</a>
-      <a href="https://tamimtotakhail.github.io/selectors/" target="_blank">Selectors</a>
-      <a href="https://tamimtotakhail.github.io/css-positioning/" target="_blank">Positioning</a>
-      <a href="https://tamimtotakhail.github.io/time-of-day/" target="_blank">Time of Day</a>
-      <a href="https://tamimtotakhail.github.io/daily-grind/" target="_blank">Daily Grind</a>
-      <a href="https://tamimtotakhail.github.io/creatures/" target="_blank">Creatures</a>
-      <a href="https://tamimtotakhail.github.io/seasonal-styles/" target="_blank">Seasonal Styles</a>
-      <a href="https://github.com/TamimTotakhail" target="_blank">GitHub</a>
-      <a href="https://LinkedIn.com/in/tamim-totakhail" target="_blank">LinkedIn</a>
-      <a href="javascript:void(0);" class="icon" onclick="myFunction()">&#9776;</a>
+        <a href="index.html" class="active">Home</a>
+        <div class="dropdown">
+            <a href="javascript:void(0);" class="dropbtn" onclick="toggleProjects()">Projects &#9660;</a>
+            <div class="dropdown-content" id="projectLinks">
+                <a href="https://tamimtotakhail.github.io/stylin-with-css/" target="_blank">Stylin with CSS</a>
+                <a href="https://tamimtotakhail.github.io/selectors/" target="_blank">Selectors</a>
+                <a href="https://tamimtotakhail.github.io/css-positioning/" target="_blank">Positioning</a>
+                <a href="https://tamimtotakhail.github.io/time-of-day/" target="_blank">Time of Day</a>
+                <a href="https://tamimtotakhail.github.io/daily-grind/" target="_blank">Daily Grind</a>
+                <a href="https://tamimtotakhail.github.io/creatures/" target="_blank">Creatures</a>
+                <a href="https://tamimtotakhail.github.io/seasonal-styles/" target="_blank">Seasonal Styles</a>
+            </div>
+        </div>
+        <a href="https://github.com/TamimTotakhail" target="_blank">GitHub</a>
+        <a href="https://LinkedIn.com/in/tamim-totakhail" target="_blank">LinkedIn</a>
+        <a href="javascript:void(0);" class="icon" onclick="myFunction()">&#9776;</a>
     </nav>
-  </header>
+</header>
+
+<style>
+    /* CSS to hide the project links initially */
+    #projectLinks {
+        display: none;
+    }
+</style>
+
+<script>
+    function toggleProjects() {
+        var projectLinks = document.getElementById("projectLinks");
+        if (projectLinks.style.display === "none") {
+            projectLinks.style.display = "block";
+        } else {
+            projectLinks.style.display = "none";
+        }
+    }
+</script>
 
   <main class="wrapper">
     <picture class="profile">
